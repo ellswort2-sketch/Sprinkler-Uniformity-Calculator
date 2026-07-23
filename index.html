@@ -34,8 +34,8 @@
     <div class="grid">
       <label>Sprinkler profile<select id="profile"></select></label>
       <div><label>Arrangement</label><div class="arrange"><button data-layout="square" class="active">Square</button><button data-layout="rect">Rectangular</button><button data-layout="triangle">Triangle</button></div></div>
-      <label>Spacing along row (ft)<input id="sx" type="number" min="10" max="200" step="1" value="60"></label>
-      <label id="syLabel">Spacing between rows (ft)<input id="sy" type="number" min="10" max="200" step="1" value="60"></label>
+      <label>Area per sprinkler (ft²)<input id="area" type="number" min="100" max="40000" step="100" value="3600"></label>
+      <label id="ratioLabel">Rectangular row/column ratio<input id="ratio" type="number" min=".25" max="4" step=".05" value="1.25"></label>
     </div>
     <div class="facts" id="facts"></div>
   </section>
@@ -73,11 +73,11 @@ const profiles=[
 {name:"Rain Bird 900E #52 Orange",group:4,pressure:80,flow:36.1,radius:72,source:"RAINBIRD.PRF record 6",v:[.37,.37,.31,.5,.44,.365,.29,.27,.27,.27,.28,.3,.325,.33,.33,.32,.31,.3,.3,.29,.27,.25,.24,.24,.22,.21,.2,.18,.16,.145,.13,.12,.105,.085,.06,.03,.01]}
 ];
 let layout="square", saved=[], current;
-const $=id=>document.getElementById(id), profile=$("profile"), sx=$("sx"), sy=$("sy");
+const $=id=>document.getElementById(id), profile=$("profile"), areaInput=$("area"), ratioInput=$("ratio");
 profiles.forEach((p,i)=>profile.add(new Option(`Group ${p.group} · ${p.name} · ${p.pressure} psi`,i)));
 document.querySelectorAll("[data-layout]").forEach(b=>b.onclick=()=>{layout=b.dataset.layout;document.querySelectorAll("[data-layout]").forEach(x=>x.classList.toggle("active",x===b));updateLayout();calculate()});
-[profile,sx,sy].forEach(e=>e.addEventListener("input",calculate));
-function updateLayout(){const tri=layout==="triangle",sq=layout==="square";$("syLabel").style.display=sq||tri?"none":"block";if(sq)sy.value=sx.value}
+[profile,areaInput,ratioInput].forEach(e=>e.addEventListener("input",calculate));
+function updateLayout(){$("ratioLabel").style.display=layout==="rect"?"block":"none"}
 function radial(p,r){if(r>p.radius)return 0;let q=r/2,i=Math.floor(q),t=q-i;if(i>=p.v.length-1)return p.v[p.v.length-1];return p.v[i]*(1-t)+p.v[i+1]*t}
 function heads(p,Sx,Sy){
   let out=[],n=Math.ceil(p.radius/Math.min(Sx,Sy))+2;
@@ -86,24 +86,29 @@ function heads(p,Sx,Sy){
   return out;
 }
 function calculate(){
-  const p=profiles[+profile.value],Sx=Math.max(10,+sx.value||60);if(layout==="square")sy.value=Sx;
-  const Sy=layout==="triangle"?Math.sqrt(3)*Sx:+sy.value||Sx,cellH=layout==="triangle"?Math.sqrt(3)*Sx:Sy, nx=64,ny=Math.max(48,Math.round(64*cellH/Sx)), hs=heads(p,Sx,Sy), vals=[];
+  const p=profiles[+profile.value],targetArea=Math.max(100,+areaInput.value||3600),ratio=Math.max(.25,+ratioInput.value||1.25);
+  let Sx,Sy,cellH;
+  if(layout==="triangle"){Sx=Math.sqrt(2*targetArea/Math.sqrt(3));Sy=Math.sqrt(3)*Sx/2;cellH=2*Sy}
+  else if(layout==="rect"){Sx=Math.sqrt(targetArea/ratio);Sy=targetArea/Sx;cellH=Sy}
+  else{Sx=Sy=Math.sqrt(targetArea);cellH=Sy}
+  const nx=64,ny=Math.max(48,Math.round(64*cellH/Sx)), hs=heads(p,Sx,Sy), vals=[];
   for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){let px=(x+.5)/nx*Sx,py=(y+.5)/ny*cellH,d=0;for(const h of hs)d+=radial(p,Math.hypot(px-h[0],py-h[1]));vals.push(d)}
   const sorted=[...vals].sort((a,b)=>a-b),mean=vals.reduce((a,b)=>a+b,0)/vals.length,q=Math.floor(vals.length/4),lq=sorted.slice(0,q).reduce((a,b)=>a+b,0)/q;
-  const du=100*lq/mean,cu=100*(1-vals.reduce((a,b)=>a+Math.abs(b-mean),0)/(vals.length*mean)),area=layout==="triangle"?Sx*Sx*Math.sqrt(3)/2:Sx*Sy,flowPR=96.3*p.flow/area,min=sorted[0],max=sorted.at(-1),k=Math.max(1,Math.round(vals.length*.05)),dry=sorted.slice(0,k).reduce((a,b)=>a+b,0)/k,wet=sorted.slice(-k).reduce((a,b)=>a+b,0)/k,sc=mean/dry;
+  const du=100*lq/mean,cu=100*(1-vals.reduce((a,b)=>a+Math.abs(b-mean),0)/(vals.length*mean)),area=targetArea,flowPR=96.3*p.flow/area,min=sorted[0],max=sorted.at(-1),k=Math.max(1,Math.round(vals.length*.05)),dry=sorted.slice(0,k).reduce((a,b)=>a+b,0)/k,wet=sorted.slice(-k).reduce((a,b)=>a+b,0)/k,sc=mean/dry;
   current={p,layout,Sx,Sy,cellH,nx,ny,vals,mean,du,cu,flowPR,sc,min,max,dry,wet,area};
-  $("facts").innerHTML=[["Flow",p.flow+" gpm"],["Pressure",p.pressure+" psi"],["Tested radius",p.radius+" ft"],["Spacing ÷ radius",(Sx/p.radius).toFixed(2)],["Source",p.source],["Heads/acre",(43560/area).toFixed(1)]].map(x=>`<div class=fact><small>${x[0]}</small><strong>${x[1]}</strong></div>`).join("");
+  const spacing=layout==="triangle"?`${Sx.toFixed(1)} ft nodes`:layout==="rect"?`${Sx.toFixed(1)} × ${Sy.toFixed(1)} ft`:`${Sx.toFixed(1)} × ${Sy.toFixed(1)} ft`;
+  $("facts").innerHTML=[["Flow",p.flow+" gpm"],["Pressure",p.pressure+" psi"],["Derived spacing",spacing],["Area per head",area.toFixed(0)+" ft²"],["Source",p.source],["Heads/acre",(43560/area).toFixed(1)]].map(x=>`<div class=fact><small>${x[0]}</small><strong>${x[1]}</strong></div>`).join("");
   $("metrics").innerHTML=[["Low-quarter DU",du.toFixed(1)+"%"],["Christiansen CU",cu.toFixed(1)+"%"],["Profile PR",mean.toFixed(3)+" in/hr"],["Flow PR",flowPR.toFixed(3)+" in/hr"],["SC, 5% dry",sc.toFixed(2)],["Density",(43560/area).toFixed(1)+" heads/ac"]].map(x=>`<div class=metric><small>${x[0]}</small><b>${x[1]}</b></div>`).join("");
   $("legend").innerHTML=[["Minimum",min],["Driest 5%",dry],["Wettest 5%",wet],["Maximum",max]].map(x=>`<span>${x[0]}<b>${x[1].toFixed(3)} in/hr</b></span>`).join("");
-  $("detail").innerHTML=`Unit cell: <b>${Sx.toFixed(1)} × ${cellH.toFixed(1)} ft</b><br>Calculation points: <b>${vals.length.toLocaleString()}</b>`;
+  $("detail").innerHTML=`Area per sprinkler: <b>${area.toFixed(0)} ft²</b><br>Sampling cell: <b>${Sx.toFixed(1)} × ${cellH.toFixed(1)} ft</b><br>Calculation points: <b>${vals.length.toLocaleString()}</b>`;
   $("readings").textContent=p.v.map((v,i)=>`${String(i*2).padStart(3)} ft : ${v.toFixed(3)} in`).join("\n");draw();
 }
 function draw(){const c=$("map"),g=c.getContext("2d"),{vals,nx,ny,min,max}=current,img=g.createImageData(nx,ny);vals.forEach((v,i)=>{let t=(v-min)/(max-min||1),r=Math.round(30+210*t),b=Math.round(220-180*t),q=i*4;img.data[q]=r;img.data[q+1]=Math.round(150-60*Math.abs(t-.5));img.data[q+2]=b;img.data[q+3]=255});let off=document.createElement("canvas");off.width=nx;off.height=ny;off.getContext("2d").putImageData(img,0,0);g.imageSmoothingEnabled=true;g.drawImage(off,0,0,c.width,c.height)}
 function layoutName(){return layout==="triangle"?"Equilateral triangle":layout==="rect"?"Rectangular":"Square"}
 $("add").onclick=()=>{saved.push({...current,label:layoutName()});renderTable()};
-function renderTable(){if(!saved.length){$("comparison").innerHTML="<p>No saved scenarios yet.</p>";return}$("comparison").innerHTML=`<table><thead><tr><th>Sprinkler</th><th>Layout</th><th>Spacing</th><th>DUlq</th><th>CU</th><th>Profile PR</th><th>Flow PR</th><th>SC</th></tr></thead><tbody>${saved.map((s,i)=>`<tr><td>${s.p.name}</td><td>${s.label}</td><td>${s.Sx.toFixed(0)} × ${s.cellH.toFixed(0)} ft</td><td>${s.du.toFixed(1)}%</td><td>${s.cu.toFixed(1)}%</td><td>${s.mean.toFixed(3)}</td><td>${s.flowPR.toFixed(3)}</td><td>${s.sc.toFixed(2)}</td></tr>`).join("")}</tbody></table>`}
+function renderTable(){if(!saved.length){$("comparison").innerHTML="<p>No saved scenarios yet.</p>";return}$("comparison").innerHTML=`<table><thead><tr><th>Sprinkler</th><th>Layout</th><th>Area/head</th><th>Derived spacing</th><th>DUlq</th><th>CU</th><th>Profile PR</th><th>Flow PR</th><th>SC</th></tr></thead><tbody>${saved.map((s,i)=>`<tr><td>${s.p.name}</td><td>${s.label}</td><td>${s.area.toFixed(0)} ft²</td><td>${s.Sx.toFixed(1)} × ${s.Sy.toFixed(1)} ft</td><td>${s.du.toFixed(1)}%</td><td>${s.cu.toFixed(1)}%</td><td>${s.mean.toFixed(3)}</td><td>${s.flowPR.toFixed(3)}</td><td>${s.sc.toFixed(2)}</td></tr>`).join("")}</tbody></table>`}
 function download(name,text,type){let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-$("csv").onclick=()=>download("sprinkler-comparison.csv","Sprinkler,Layout,Spacing,DUlq,CU,Profile PR,Flow PR,SC\n"+saved.map(s=>`"${s.p.name}","${s.label}","${s.Sx} x ${s.cellH.toFixed(1)}",${s.du.toFixed(1)},${s.cu.toFixed(1)},${s.mean.toFixed(3)},${s.flowPR.toFixed(3)},${s.sc.toFixed(2)}`).join("\n"),"text/csv");
+$("csv").onclick=()=>download("sprinkler-comparison.csv","Sprinkler,Layout,Area per head,Derived spacing,DUlq,CU,Profile PR,Flow PR,SC\n"+saved.map(s=>`"${s.p.name}","${s.label}",${s.area.toFixed(0)},"${s.Sx.toFixed(1)} x ${s.Sy.toFixed(1)}",${s.du.toFixed(1)},${s.cu.toFixed(1)},${s.mean.toFixed(3)},${s.flowPR.toFixed(3)},${s.sc.toFixed(2)}`).join("\n"),"text/csv");
 $("json").onclick=()=>download("sprinkler-profiles.json",JSON.stringify({radial_function:"piecewise linear at 2-ft increments; zero beyond tested radius",units:{distance:"ft",depth:"in per 60-min test"},profiles},null,2),"application/json");
 $("clear").onclick=()=>{saved=[];renderTable()};updateLayout();calculate();
 </script>
