@@ -17,6 +17,7 @@
     .metric:first-child{border-color:var(--gold);background:#fff8e8}.fact small,.metric small{display:block;color:#62777a;text-transform:uppercase;font-weight:bold}.metric b{display:block;font:2rem Georgia,serif;margin-top:6px}
     .results{display:grid;grid-template-columns:minmax(0,2fr) minmax(250px,1fr);gap:22px;margin-top:22px}canvas{width:100%;height:auto;border:1px solid var(--line);background:white}
     .notes{background:#eff6f5;padding:18px}.notes code{display:block;background:#17373b;color:white;padding:12px;overflow:auto}.legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.legend span{font-size:.78rem}.legend b{display:block}
+    .scale-key{margin:12px 0 4px}.scale-title{display:flex;justify-content:space-between;gap:15px;font-size:.82rem;font-weight:bold}.colorbar{height:18px;margin-top:6px;border:1px solid #9eaeac;background:linear-gradient(90deg,#1e5abe 0%,#57b0cd 25%,#f5f4dc 50%,#f09938 75%,#b4232d 100%)}.scale-ticks{display:flex;justify-content:space-between;font-size:.75rem}.scale-note{margin:5px 0 0;color:#597175;font-size:.78rem}.map-caption{margin:12px 0 0;padding:10px 12px;border-left:3px solid var(--teal);background:#f4f8f7;color:#405d61;font-size:.86rem}
     table{width:100%;border-collapse:collapse;margin-top:16px;font-size:.9rem}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left}th{background:#edf6f4}.actions{display:flex;gap:10px;margin-top:14px}.actions button{width:auto}
     details{margin-top:18px}pre{max-height:260px;overflow:auto;background:#f2f6f5;padding:14px;font-size:.8rem}.warn{border-left:4px solid var(--gold);padding-left:12px}
     @media(max-width:900px){.grid,.facts,.metrics,.results{grid-template-columns:1fr 1fr}.facts,.metrics{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){.grid,.facts,.metrics,.results{grid-template-columns:1fr}.arrange{display:block}.legend{grid-template-columns:1fr 1fr}}
@@ -30,7 +31,7 @@
 </header>
 <main>
   <section class="panel">
-    <h2>Define the scenario</h2><p class="sub">Select a laboratory profile, arrangement, and node spacing.</p>
+    <h2>Define the scenario</h2><p class="sub">Select a laboratory profile, arrangement, and equal area per sprinkler.</p>
     <div class="grid">
       <label>Sprinkler profile<select id="profile"></select></label>
       <div><label>Arrangement</label><div class="arrange"><button data-layout="square" class="active">Square</button><button data-layout="rect">Rectangular</button><button data-layout="triangle">Triangle</button></div></div>
@@ -43,10 +44,21 @@
     <h2>Evaluate the overlap</h2><p class="sub">A periodic unit cell is sampled; surrounding sprinklers remove edge effects.</p>
     <div class="metrics" id="metrics"></div>
     <div class="results">
-      <div><h3>Application-depth map</h3><canvas id="map" width="640" height="480" aria-label="Simulated application-depth heatmap"></canvas><div class="legend" id="legend"></div></div>
+      <div>
+        <h3>Normalized application-depth map</h3>
+        <canvas id="map" width="640" height="480" aria-label="Normalized sprinkler application-depth heatmap"></canvas>
+        <div class="scale-key" aria-label="Normalized application color legend">
+          <div class="scale-title"><span>Drier than mean</span><span>Local rate ÷ mean rate</span><span>Wetter than mean</span></div>
+          <div class="colorbar"></div>
+          <div class="scale-ticks"><span>≤0.50</span><span>0.75</span><span>1.00</span><span>1.25</span><span>≥1.50</span></div>
+          <p class="scale-note">Fixed for every scenario. Colors below 0.50 or above 1.50 are clipped to the end colors.</p>
+        </div>
+        <div class="legend" id="legend"></div>
+        <p class="map-caption"><strong>Figure:</strong> Each color represents local application divided by the scenario mean. Blue areas receive less than the mean, pale areas are near the mean, and orange-red areas receive more. The fixed 0.50–1.50 scale is used for every scenario so spatial uniformity can be compared directly.</p>
+      </div>
       <aside class="notes">
         <h3>Calculation method</h3>
-        <ol><li>Linearly interpolate the radial profile.</li><li>Add every sprinkler contribution reaching each point.</li><li>Sort depths for low-quarter DU.</li><li>Compute Christiansen CU from absolute deviations.</li></ol>
+        <ol><li>Linearly interpolate the radial profile.</li><li>Add every sprinkler contribution reaching each point.</li><li>Normalize each point by the scenario mean for the map.</li><li>Sort actual depths for low-quarter DU.</li><li>Compute Christiansen CU from absolute deviations.</li></ol>
         <code>D(x,y) = Σ p(√((x−xj)²+(y−yj)²))</code>
         <p id="detail"></p>
         <button class="primary" id="add">Add to comparison</button>
@@ -95,11 +107,16 @@ function calculate(){
   const spacing=layout==="triangle"?`${Sx.toFixed(1)} ft nodes`:layout==="rect"?`${Sx.toFixed(1)} × ${Sy.toFixed(1)} ft`:`${Sx.toFixed(1)} × ${Sy.toFixed(1)} ft`;
   $("facts").innerHTML=[["Flow",p.flow+" gpm"],["Pressure",p.pressure+" psi"],["Derived spacing",spacing],["Test radius / increment",`${p.radius} ft / ${p.step} ft`],["Source",p.source],["Heads/acre",(43560/area).toFixed(1)]].map(x=>`<div class=fact><small>${x[0]}</small><strong>${x[1]}</strong></div>`).join("");
   $("metrics").innerHTML=[["Low-quarter DU",du.toFixed(1)+"%"],["Christiansen CU",cu.toFixed(1)+"%"],["Profile PR",mean.toFixed(3)+" in/hr"],["Flow PR",flowPR.toFixed(3)+" in/hr"],["SC, 5% dry",sc.toFixed(2)],["Density",(43560/area).toFixed(1)+" heads/ac"]].map(x=>`<div class=metric><small>${x[0]}</small><b>${x[1]}</b></div>`).join("");
-  $("legend").innerHTML=[["Minimum",min],["Driest 5%",dry],["Wettest 5%",wet],["Maximum",max]].map(x=>`<span>${x[0]}<b>${x[1].toFixed(3)} in/hr</b></span>`).join("");
+  $("legend").innerHTML=[["Minimum",min],["Driest 5%",dry],["Wettest 5%",wet],["Maximum",max]].map(x=>`<span>${x[0]}<b>${(x[1]/mean).toFixed(2)}× mean</b>${x[1].toFixed(3)} in/hr</span>`).join("");
   $("detail").innerHTML=`Area per sprinkler: <b>${area.toFixed(0)} ft²</b><br>Sampling cell: <b>${Sx.toFixed(1)} × ${cellH.toFixed(1)} ft</b><br>Calculation points: <b>${vals.length.toLocaleString()}</b>`;
   $("readings").textContent=p.v.map((v,i)=>`${String(i*p.step).padStart(5)} ft : ${v.toFixed(3)} in`).join("\n");draw();
 }
-function draw(){const c=$("map"),g=c.getContext("2d"),{vals,nx,ny,min,max}=current,img=g.createImageData(nx,ny);vals.forEach((v,i)=>{let t=(v-min)/(max-min||1),r=Math.round(30+210*t),b=Math.round(220-180*t),q=i*4;img.data[q]=r;img.data[q+1]=Math.round(150-60*Math.abs(t-.5));img.data[q+2]=b;img.data[q+3]=255});let off=document.createElement("canvas");off.width=nx;off.height=ny;off.getContext("2d").putImageData(img,0,0);g.imageSmoothingEnabled=true;g.drawImage(off,0,0,c.width,c.height)}
+function heatColor(normalized){
+  const anchors=[[30,90,190],[87,176,205],[245,244,220],[240,153,56],[180,35,45]];
+  const t=Math.max(0,Math.min(1,(normalized-.5)/1.0)),segment=Math.min(3,Math.floor(t*4)),fraction=t*4-segment;
+  return anchors[segment].map((value,index)=>Math.round(value+(anchors[segment+1][index]-value)*fraction));
+}
+function draw(){const c=$("map"),g=c.getContext("2d"),{vals,nx,ny,mean}=current,img=g.createImageData(nx,ny);vals.forEach((v,i)=>{const color=heatColor(v/mean),q=i*4;img.data[q]=color[0];img.data[q+1]=color[1];img.data[q+2]=color[2];img.data[q+3]=255});let off=document.createElement("canvas");off.width=nx;off.height=ny;off.getContext("2d").putImageData(img,0,0);g.imageSmoothingEnabled=true;g.drawImage(off,0,0,c.width,c.height)}
 function layoutName(){return layout==="triangle"?"Equilateral triangle":layout==="rect"?"Rectangular":"Square"}
 $("add").onclick=()=>{saved.push({...current,label:layoutName()});renderTable()};
 function renderTable(){if(!saved.length){$("comparison").innerHTML="<p>No saved scenarios yet.</p>";return}$("comparison").innerHTML=`<table><thead><tr><th>Sprinkler</th><th>Layout</th><th>Area/head</th><th>Derived spacing</th><th>DUlq</th><th>CU</th><th>Profile PR</th><th>Flow PR</th><th>SC</th></tr></thead><tbody>${saved.map((s,i)=>`<tr><td>${s.p.name}</td><td>${s.label}</td><td>${s.area.toFixed(0)} ft²</td><td>${s.Sx.toFixed(1)} × ${s.Sy.toFixed(1)} ft</td><td>${s.du.toFixed(1)}%</td><td>${s.cu.toFixed(1)}%</td><td>${s.mean.toFixed(3)}</td><td>${s.flowPR.toFixed(3)}</td><td>${s.sc.toFixed(2)}</td></tr>`).join("")}</tbody></table>`}
